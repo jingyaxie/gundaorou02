@@ -218,7 +218,7 @@ void openStrategy0(Counter & magic1Counter)
          C：如果既有多单又有空单，按照之前的逻辑顺势加仓；
          */
         
-        // C：只有多单或者只有空单，不进行双向加单，只执行上面的马丁加仓
+        // C：如果既有多单又有空单，按照之前的逻辑顺势加仓
         if (magic1Counter.buyOrderCount != 0 && magic1Counter.sellOrderCount != 0) {
             
             // 既有多单又有空单，进行顺势加仓，解套
