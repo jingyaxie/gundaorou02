@@ -33,17 +33,8 @@ input bool isOpenSAR  = true;//是否开启SAR开仓
 input int OverBuyValue = 85;//Stochastic超买值
 input int OverSellValue = 15;//Stochastic超卖值
 
-enum iMAEnum
-{
-    M1 = PERIOD_M1,//一分钟
-    M5 = PERIOD_M5,//五分钟
-    M15 = PERIOD_M15,//十五分钟
-    M30 = PERIOD_M30,//十五分钟
-    H1 = PERIOD_H1,//一小时
-    H4 = PERIOD_H4,//四小时
-};
 
-extern iMAEnum iMAPERIOD = PERIOD_M5;//均线周期
+extern ENUM_TIMEFRAMES iMAPERIOD = PERIOD_M5;//均线周期
 input int slow_k_num = 12;//快线k线历史个数
 
 datetime firstOrderBuyTime  = 0;
@@ -117,6 +108,12 @@ int spread;
 int baseInterval;
 double sar;
 
+//趋势震荡策略变量
+// 全局变量
+double shortMA, longMA, rsi, adx, atr;
+input double RsiHigh = 70;
+input double RsiLow = 30;
+
 int OnInit()
 {
     initSubViews();
@@ -175,7 +172,9 @@ void OnTick()
     }
     
     // 开始跑策略
-    openStrategy0(magic1Counter);
+    //openStrategy0(magic1Counter);
+    
+    openStrategyFollowByMarketCondition(magic1Counter);
 }
 
 /**
@@ -357,6 +356,96 @@ void openStrategy0(Counter & magic1Counter)
         }
         
         
+    }
+}
+
+/**
+ 策略：根据均线 + RSI + ADX 指标来识别 趋势行情和震荡行情，然后根据不同的行情 执行 不同的策略
+ */
+void openStrategyFollowByMarketCondition(Counter & magic1Counter)
+{
+    // 获取指定时间周期的价格数据
+    double prices[];
+    ArraySetAsSeries(prices, true);
+    CopyClose(NULL, iMAPERIOD, 0, 100, prices);
+    
+    // 计算技术指标
+    shortMA = iMA(NULL, iMAPERIOD, 20, 0, MODE_SMA, PRICE_CLOSE, 0);
+    longMA = iMA(NULL, iMAPERIOD, 50, 0, MODE_SMA, PRICE_CLOSE, 0);
+    rsi = iRSI(NULL, iMAPERIOD, 14, PRICE_CLOSE, 0);
+    adx = iADX(NULL, iMAPERIOD, 14, PRICE_CLOSE, MODE_MAIN,0);
+    atr = iATR(NULL, iMAPERIOD, 14, 0);
+
+    // 识别市场条件
+    string marketCondition = IdentifyMarketCondition();
+
+    // 执行相应的交易策略
+    if (marketCondition == "trending")
+    {
+        ExecuteTrendingStrategy();
+    }
+    else if (marketCondition == "range")
+    {
+        ExecuteRangeStrategy();
+    }
+}
+
+// 识别市场条件函数
+string IdentifyMarketCondition()
+{
+    if (((shortMA > longMA && rsi > RsiHigh) || (shortMA < longMA && rsi < RsiLow)) && adx > 25)
+    {
+        //Print("当前趋势为：趋势行情");
+        return "trending";
+    }
+    else if (adx < 20 && rsi > RsiLow && rsi < RsiHigh)
+    {
+        //Print("当前趋势为：震荡行情");
+        return "range";
+    }
+    else
+    {
+        //Print("当前趋势为：不知道什么鬼行情，啥都不做");
+        return "uncertain";
+    }
+}
+
+// 执行趋势跟踪策略函数
+void ExecuteTrendingStrategy()
+{
+    // 检查是否已有持仓
+    if (OrdersTotal() == 0)
+    {
+     if (rsi > RsiHigh)
+     {
+        // 开多单
+        Print("当前趋势为：趋势行情  开多单");
+        SendNotification("趋势行情  开多单");
+     }
+     else if (rsi < RsiLow)
+     {
+         // 开空单
+        Print("当前趋势为：趋势行情  开单");
+        SendNotification("趋势行情  开空单");
+     }
+    }
+}
+
+
+// 执行震荡交易策略函数
+void ExecuteRangeStrategy()
+{
+        // 检查是否已有持仓
+    if (OrdersTotal() == 0)
+    {
+         // RSI小于30时买入
+        if (rsi < RsiLow)
+        {
+        }
+        // RSI大于70时卖出
+        else if (rsi > RsiHigh)
+        {
+        }
     }
 }
 
@@ -939,3 +1028,4 @@ void updateAccountInfo(const Counter & counter)
 
 void OnDeinit(const int reason)
 {}
+
