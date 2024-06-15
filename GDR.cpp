@@ -119,7 +119,7 @@ double sar;
 
 int OnInit()
 {
-    createButtons();
+    initSubViews();
     
     StopLevel = MarketInfo(Symbol(), MODE_STOPLEVEL);
     baseInterval = addPositionInterval;
@@ -816,6 +816,12 @@ Counter CalcTotal(int magicma)
     return counter;
 }
 
+void initSubViews()
+{
+    createButtons();
+    createInfoBoard();
+}
+
 void OnChartEvent(const int id,
                   const long &lparam,
                   const double &dparam,
@@ -835,6 +841,14 @@ void OnChartEvent(const int id,
         closeBuyOrder(magicNumber);
         closeSellOrder(magicNumber);
     }
+}
+
+/**
+ 信息面板
+ */
+void createInfoBoard()
+{
+    
 }
 
 void createButtons()
@@ -905,18 +919,19 @@ void updateAccountInfo(const Counter & counter)
     double freeMargin = AccountFreeMargin();//账户自由保证金
     double margin = AccountMargin();//账户已用保证金
     double profit = AccountProfit();//账户盈利金额
-    string msg =  "                                        账户余额:"+DoubleToStr(balance,2)+"\n"+
-    "                                        账户信用额度:"+DoubleToStr(credit, 2)+"\n"+
-    "                                        账户净值:"+DoubleToStr(equity, 2)+"\n"+
-    "                                        账户自由保证金:"+DoubleToStr(freeMargin, 2)+"\n"+
-    "                                        账户已用保证金:"+DoubleToStr(margin, 2)+"\n"+
-    "                                        账户盈利金额:"+DoubleToStr(profit, 2)+"\n"+
-    "                                        sell:"+DoubleToStr(counter.sellOrderCount,0)+",  "+
+    string msg =  "                                                              账户余额:"+DoubleToStr(balance,2)+"\n"+
+    "                                                               账户信用额度:"+DoubleToStr(credit, 2)+"\n"+
+    "                                                               账户净值:"+DoubleToStr(equity, 2)+"\n"+
+    "                                                               账户自由保证金:"+DoubleToStr(freeMargin, 2)+"\n"+
+    "                                                               账户已用保证金:"+DoubleToStr(margin, 2)+"\n"+
+    "                                                               账户盈利金额:"+DoubleToStr(profit, 2)+"\n"+
+    "                                                               空单个数和手数:"+DoubleToStr(counter.sellOrderCount,0)+",  "+
     DoubleToStr(counter.sellTotalLots,2)+"手,  "+
     "盈亏:"+DoubleToStr(counter.sellTotalProfit,2)+"\n"+
-    "                                        buy:"+DoubleToStr(counter.buyOrderCount,2)+",  "+
+    "                                                               多单个数和手数:"+DoubleToStr(counter.buyOrderCount,2)+",  "+
     DoubleToStr(counter.buyTotalLots,2)+"手,  "+
-    "Version: 2024-6-14 15:50 盈亏:"+DoubleToStr(counter.buyTotalProfit,2)+"\n";
+    "盈亏:"+DoubleToStr(counter.buyTotalProfit,2)+"\n" +
+    "                                                                Version: 2024-6-15 09:55";
     
     Comment(msg);
     
