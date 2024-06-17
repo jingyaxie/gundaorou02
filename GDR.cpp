@@ -11,8 +11,8 @@ enum TradeDirection
 
 extern TradeDirection tradeDirection = SELL;   //做单方向
 
-input double openLots = 0.03;               //首次开仓手数
-input int addPositionInterval = 500;        //加仓间隔点数
+input double openLots = 0.1;               //首次开仓手数
+input int addPositionInterval = 50;        //加仓间隔点数
 input double positionMultiplier = 1.3;      //加仓的倍数
 input double maxOrderLots = 2.0;            //单个订单最大手数
 input int additionalSpreadAfterMaxOrder = 100;//单个订单达到最大手数后开仓间距增加点数
@@ -30,6 +30,9 @@ input int jietaoCTrailingStop1 = 1500;//解套最小盈利点数
 input int jietaoCTrailingStep2 = 1500;//解套移动止损移动间隔点数
 input bool isOpenIEMA = false;//是否开启均线辅助开仓
 input bool isOpenSAR  = true;//是否开启SAR开仓
+input string s3 = "消单逻辑参数";
+input bool isOpenDismiss  = true;//是否开启多空消单逻辑
+input int dismissProfit = 2;//盈利多少开始消单
 input int OverBuyValue = 85;//Stochastic超买值
 input int OverSellValue = 15;//Stochastic超卖值
 
@@ -96,6 +99,8 @@ struct Counter
     datetime          firstSellOrderOpenTime;
     int               sellOrderCount;
     double            lastSellStop;
+    
+    //=====消单参数=================
 };
 
 bool isFirstModeFirstOrderPlaced = false;//第一模式首单是否开过
@@ -114,6 +119,8 @@ double shortMA, longMA, rsi, adx, atr;
 input double RsiHigh = 70;
 input double RsiLow = 30;
 
+// 2024-6-17 优化思路：1.单边行情开启整体平仓单边加仓；2.震荡行情新加消单逻辑；3.SAR单边做单逻辑不变
+
 int OnInit()
 {
     initSubViews();
@@ -122,7 +129,6 @@ int OnInit()
     baseInterval = addPositionInterval;
     
     Print("StopLevel = ", StopLevel);
-    Print("Version : 2024-6-14 15:50 ");
     return(INIT_SUCCEEDED);
 }
 
@@ -171,10 +177,16 @@ void OnTick()
         TrailingPositions(magic1Counter, magicNumber);
     }
     
-    // 开始跑策略
-    //openStrategy0(magic1Counter);
+    // 消单逻辑
+    if (isOpenDismiss) {
+        dismissProfit(magic1Counter);
+    }
     
-    openStrategyFollowByMarketCondition(magic1Counter);
+    // 开始跑策略
+    openStrategy0(magic1Counter);
+    
+    //openStrategyFollowByMarketCondition(magic1Counter);
+    
 }
 
 /**
@@ -187,11 +199,14 @@ void openStrategy0(Counter & magic1Counter)
     bool sellSignal = false;
     
     //以SAR为多空开仓方向
+    // 2024-6-17 优化为5分钟和15分钟的方向一致 才判定一个方向
     if (isOpenSAR) {
         sar = iSAR(NULL, 0, 0.02, 0.2, 0);
-        if (Bid > sar) {
+        double longSAR = iSAR(NULL,PERIOD_M15,0.02,0.2,0);
+        
+        if (Bid > sar && Bid > longSAR) {
             buySignal = true;
-        }else{
+        }else if(Ask < sar && Ask < longSAR){
             sellSignal = true;
         }
     }
@@ -329,7 +344,7 @@ void openStrategy0(Counter & magic1Counter)
                     }
                 }
                 
-            }else{
+            }else if (sellSignal){
                 // 开空单
                 if (magic1Counter.sellOrderCount == 0) {
                     openSell(openLots, 0,0,orderComment,magicNumber);
@@ -354,13 +369,12 @@ void openStrategy0(Counter & magic1Counter)
             }
             
         }
-        
-        
     }
 }
 
 /**
  策略：根据均线 + RSI + ADX 指标来识别 趋势行情和震荡行情，然后根据不同的行情 执行 不同的策略
+ 
  */
 void openStrategyFollowByMarketCondition(Counter & magic1Counter)
 {
@@ -420,13 +434,13 @@ void ExecuteTrendingStrategy()
      {
         // 开多单
         Print("当前趋势为：趋势行情  开多单");
-        SendNotification("趋势行情  开多单");
+        //SendNotification("趋势行情  开多单");
      }
      else if (rsi < RsiLow)
      {
          // 开空单
-        Print("当前趋势为：趋势行情  开单");
-        SendNotification("趋势行情  开空单");
+        Print("当前趋势为：趋势行情  开空单");
+        //SendNotification("趋势行情  开空单");
      }
     }
 }
@@ -441,10 +455,12 @@ void ExecuteRangeStrategy()
          // RSI小于30时买入
         if (rsi < RsiLow)
         {
+         Print("当前趋势为：震荡行情  开多单");
         }
         // RSI大于70时卖出
         else if (rsi > RsiHigh)
         {
+         Print("当前趋势为：震荡行情  开空单");
         }
     }
 }
@@ -563,6 +579,12 @@ void openStrategy1(Counter & magic1Counter)
             }
         }
     }
+}
+
+// 根据止盈金额进行消单
+void dismissProfit(Counter & counter)
+{
+    
 }
 
 void TrailingPositions(Counter & magic1Counter, int magicma)
@@ -1028,4 +1050,3 @@ void updateAccountInfo(const Counter & counter)
 
 void OnDeinit(const int reason)
 {}
-
