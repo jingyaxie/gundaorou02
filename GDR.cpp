@@ -378,18 +378,6 @@ void openStrategy0(Counter & magic1Counter)
  */
 void openStrategyFollowByMarketCondition(Counter & magic1Counter)
 {
-    // 获取指定时间周期的价格数据
-    double prices[];
-    ArraySetAsSeries(prices, true);
-    CopyClose(NULL, iMAPERIOD, 0, 100, prices);
-    
-    // 计算技术指标
-    shortMA = iMA(NULL, iMAPERIOD, 20, 0, MODE_SMA, PRICE_CLOSE, 0);
-    longMA = iMA(NULL, iMAPERIOD, 50, 0, MODE_SMA, PRICE_CLOSE, 0);
-    rsi = iRSI(NULL, iMAPERIOD, 14, PRICE_CLOSE, 0);
-    adx = iADX(NULL, iMAPERIOD, 14, PRICE_CLOSE, MODE_MAIN,0);
-    atr = iATR(NULL, iMAPERIOD, 14, 0);
-
     // 识别市场条件
     string marketCondition = IdentifyMarketCondition();
 
@@ -407,6 +395,18 @@ void openStrategyFollowByMarketCondition(Counter & magic1Counter)
 // 识别市场条件函数
 string IdentifyMarketCondition()
 {
+    // 获取指定时间周期的价格数据
+    double prices[];
+    ArraySetAsSeries(prices, true);
+    CopyClose(NULL, iMAPERIOD, 0, 100, prices);
+    
+    // 计算技术指标
+    shortMA = iMA(NULL, iMAPERIOD, 20, 0, MODE_SMA, PRICE_CLOSE, 0);
+    longMA = iMA(NULL, iMAPERIOD, 50, 0, MODE_SMA, PRICE_CLOSE, 0);
+    rsi = iRSI(NULL, iMAPERIOD, 14, PRICE_CLOSE, 0);
+    adx = iADX(NULL, iMAPERIOD, 14, PRICE_CLOSE, MODE_MAIN,0);
+    atr = iATR(NULL, iMAPERIOD, 14, 0);
+    
     if (((shortMA > longMA && rsi > RsiHigh) || (shortMA < longMA && rsi < RsiLow)) && adx > 25)
     {
         //Print("当前趋势为：趋势行情");
@@ -582,9 +582,181 @@ void openStrategy1(Counter & magic1Counter)
 }
 
 // 根据止盈金额进行消单
+// 消单逻辑分成两种：1.用最盈利的单子去平仓最亏损的单子。2.用最大手数的盈利单子去平仓另外一个方向最大手数的单子。
+// 震荡行情的时候 采用 1 方案，趋势行情采用 2 方案；
 void dismissProfit(Counter & counter)
 {
+    // 识别市场条件
+    string marketCondition = IdentifyMarketCondition();
+
+    // 执行相应的交易策略
+    if (marketCondition == "trending")
+    {
+        // 方案2：用最大手数的单子对冲
+        // 找到最大手数的多单和空单并对冲它们
+        HedgeLargestLotOrders(counter);
+    }
+    else if (marketCondition == "range")
+    {
+        // 方案 1
+        // 找到最盈利和最亏损的订单并对冲它们
+        HedgeMostProfitableAndMostLosingOrders(counter);
+    }
+}
+
+// 方案 1
+// 找到最盈利和最亏损的订单并对冲它们
+void HedgeMostProfitableAndMostLosingOrders(Counter & counter)
+{
+    int totalOrders = OrdersTotal();
     
+    // 如果订单数量少于2，不执行对冲
+    if (totalOrders < 2)
+    {
+        return;
+    }
+    
+    // 如果只有一个方向的单子，不执行对冲
+    if (counter.sellOrderCount == 0 || counter.buyOrderCount == 0)
+    {
+        return;
+    }
+
+    int mostProfitableOrderIndex = -1;
+    int mostLosingOrderIndex = -1;
+    double maxProfit = -DBL_MAX;
+    double maxLoss = DBL_MAX;
+
+    // 找到最盈利和最亏损的订单
+    for (int i = 0; i < totalOrders; i++)
+    {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+        {
+            double profit = OrderProfit() + OrderSwap() + OrderCommission();
+
+            if (profit > maxProfit)
+            {
+                maxProfit = profit;
+                mostProfitableOrderIndex = i;
+            }
+            if (profit < maxLoss)
+            {
+                maxLoss = profit;
+                mostLosingOrderIndex = i;
+            }
+        }
+    }
+
+    // 计算最盈利和最亏损订单的总利润
+    double totalProfit = maxProfit + fabs(maxLoss);
+
+    if (mostProfitableOrderIndex != -1 && mostLosingOrderIndex != -1 && totalProfit >= dismissProfit)
+    {
+        OrderSelect(mostProfitableOrderIndex, SELECT_BY_POS, MODE_TRADES);
+        int ticket1 = OrderTicket();
+        double lots1 = OrderLots();
+        int type1 = OrderType();
+
+        OrderSelect(mostLosingOrderIndex, SELECT_BY_POS, MODE_TRADES);
+        int ticket2 = OrderTicket();
+        double lots2 = OrderLots();
+        int type2 = OrderType();
+
+        // 平仓最盈利和最亏损的订单
+        if (OrderClose(ticket1, lots1, OrderClosePrice(), 3, Violet) && OrderClose(ticket2, lots2, OrderClosePrice(), 3, Violet))
+        {
+            Print("平仓最盈利的订单 (ticket ", ticket1, ") 和最亏损的订单 (ticket ", ticket2, ")");
+        }
+        else
+        {
+            Print("对冲失败");
+        }
+    }
+    else
+    {
+        Print("暂时没有需要对冲的单子");
+    }
+}
+
+// 方案2：用最大手数的单子对冲
+// 找到最大手数的多单和空单并对冲它们
+void HedgeLargestLotOrders(Counter & counter)
+{
+    int totalOrders = OrdersTotal();
+
+    // 如果订单数量少于2，不执行对冲
+    if (totalOrders < 2)
+    {
+        return;
+    }
+    
+    // 如果只有一个方向的单子，不执行对冲
+    if (counter.sellOrderCount == 0 || counter.buyOrderCount == 0)
+    {
+        return;
+    }
+
+    int largestLongOrderIndex = -1;
+    int largestShortOrderIndex = -1;
+    double largestLongLot = 0;
+    double largestShortLot = 0;
+
+    // 找到最大手数的多单和空单
+    for (int i = 0; i < totalOrders; i++)
+    {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+        {
+            double lots = OrderLots();
+            int type = OrderType();
+
+            if (type == OP_BUY && lots > largestLongLot)
+            {
+                largestLongLot = lots;
+                largestLongOrderIndex = i;
+            }
+            if (type == OP_SELL && lots > largestShortLot)
+            {
+                largestShortLot = lots;
+                largestShortOrderIndex = i;
+            }
+        }
+    }
+
+    // 检查是否找到有效的多单和空单
+    if (largestLongOrderIndex != -1 && largestShortOrderIndex != -1)
+    {
+        OrderSelect(largestLongOrderIndex, SELECT_BY_POS, MODE_TRADES);
+        int longTicket = OrderTicket();
+        double longLots = OrderLots();
+        double longProfit = OrderProfit();
+
+        OrderSelect(largestShortOrderIndex, SELECT_BY_POS, MODE_TRADES);
+        int shortTicket = OrderTicket();
+        double shortLots = OrderLots();
+        double shortProfit = OrderProfit();
+
+        // 检查利润是否满足条件
+        if (longProfit + shortProfit >= dismissProfit)
+        {
+            // 平仓最大手数的多单和空单
+            if (OrderClose(longTicket, longLots, OrderClosePrice(), 3, Violet) && OrderClose(shortTicket, shortLots, OrderClosePrice(), 3, Violet))
+            {
+                Print("平仓最大手数的多单 (ticket ", longTicket, ") 和空单(ticket ", shortTicket, ")");
+            }
+            else
+            {
+                Print("最大手数平仓失败");
+            }
+        }
+        else
+        {
+            Print("利润不满足条件: longProfit + shortProfit = ", longProfit + shortProfit);
+        }
+    }
+    else
+    {
+        Print("没有需要平仓的单子");
+    }
 }
 
 void TrailingPositions(Counter & magic1Counter, int magicma)
@@ -1050,3 +1222,4 @@ void updateAccountInfo(const Counter & counter)
 
 void OnDeinit(const int reason)
 {}
+
