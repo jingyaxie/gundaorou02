@@ -624,8 +624,8 @@ void HedgeMostProfitableAndMostLosingOrders(Counter & counter)
 
     int mostProfitableOrderIndex = -1;
     int mostLosingOrderIndex = -1;
-    double maxProfit = -DBL_MAX;
-    double maxLoss = DBL_MAX;
+    double maxProfit = 0;
+    double maxLoss = 0;
 
     // 找到最盈利和最亏损的订单
     for (int i = 0; i < totalOrders; i++)
@@ -648,8 +648,11 @@ void HedgeMostProfitableAndMostLosingOrders(Counter & counter)
     }
 
     // 计算最盈利和最亏损订单的总利润
-    double totalProfit = maxProfit + fabs(maxLoss);
-
+    double totalProfit = maxProfit + maxLoss;
+    Print("计算最盈利",maxProfit);
+    Print("计算最亏损",maxLoss);
+    Print("计算最盈利和最亏损订单的总利润",totalProfit);
+     
     if (mostProfitableOrderIndex != -1 && mostLosingOrderIndex != -1 && totalProfit >= dismissProfit)
     {
         OrderSelect(mostProfitableOrderIndex, SELECT_BY_POS, MODE_TRADES);
@@ -663,7 +666,7 @@ void HedgeMostProfitableAndMostLosingOrders(Counter & counter)
         int type2 = OrderType();
 
         // 平仓最盈利和最亏损的订单
-        if (OrderClose(ticket1, lots1, OrderClosePrice(), 3, Violet) && OrderClose(ticket2, lots2, OrderClosePrice(), 3, Violet))
+        if (OrderClose(ticket1, lots1, OrderClosePrice(), 300,Violet) && OrderClose(ticket2, lots2, OrderClosePrice(), 300, Violet))
         {
             Print("平仓最盈利的订单 (ticket ", ticket1, ") 和最亏损的订单 (ticket ", ticket2, ")");
         }
@@ -739,7 +742,7 @@ void HedgeLargestLotOrders(Counter & counter)
         if (longProfit + shortProfit >= dismissProfit)
         {
             // 平仓最大手数的多单和空单
-            if (OrderClose(longTicket, longLots, OrderClosePrice(), 3, Violet) && OrderClose(shortTicket, shortLots, OrderClosePrice(), 3, Violet))
+            if (OrderClose(longTicket, longLots, OrderClosePrice(), 300, Violet) && OrderClose(shortTicket, shortLots, OrderClosePrice(), 300, Violet))
             {
                 Print("平仓最大手数的多单 (ticket ", longTicket, ") 和空单(ticket ", shortTicket, ")");
             }
@@ -1214,7 +1217,7 @@ void updateAccountInfo(const Counter & counter)
     "                                                               多单个数和手数:"+DoubleToStr(counter.buyOrderCount,2)+",  "+
     DoubleToStr(counter.buyTotalLots,2)+"手,  "+
     "盈亏:"+DoubleToStr(counter.buyTotalProfit,2)+"\n" +
-    "                                                                Version: 2024-6-15 09:55";
+    "                                                                Version: 2024-6-18 09:55";
     
     Comment(msg);
     
@@ -1222,4 +1225,5 @@ void updateAccountInfo(const Counter & counter)
 
 void OnDeinit(const int reason)
 {}
+
 
