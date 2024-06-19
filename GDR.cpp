@@ -1,3 +1,4 @@
+
 #property copyright "Copyright 2021, MetaQuotes Software Corp."
 #property link      "https://www.mql5.com"
 #property version   "1.00"
@@ -48,6 +49,9 @@ double firstBuyOrderPrice;
 
 double firstSellOrderLots;
 double firstSellOrderPrice;
+
+int profitableOrders[1000] ;
+int lossOrders[1000] ;
 
 // 订单统计
 struct Counter
@@ -162,7 +166,7 @@ void OnTick()
     updateAccountInfo(magic1Counter);
     
     if (magic1Counter.totalProfit < maxStopLoss) {
-        return;
+        //return;
     }
     
     // 整体止盈
@@ -170,7 +174,7 @@ void OnTick()
     {
         closeAllOrdersByMagicNumber(magicNumber);
     }
-    
+
     // 移动止盈
     if(isOpenTrailingTakeProfit)
     {
@@ -179,6 +183,7 @@ void OnTick()
     
     // 消单逻辑
     if (isOpenDismiss) {
+
         dismissProfit(magic1Counter);
     }
     
@@ -206,11 +211,11 @@ void openStrategy0(Counter & magic1Counter)
         
         if (Bid > sar && Bid > longSAR) {
             buySignal = true;
-        }else if(Ask < sar && Ask < longSAR){
+        }else if(Bid < sar && Bid < longSAR){
             sellSignal = true;
         }
     }
-    
+
     if(IsSpreadWithinThreshold())
     {
         int nextBuyOrderIntervalPoint = baseInterval;
@@ -234,7 +239,7 @@ void openStrategy0(Counter & magic1Counter)
         
         // C：如果既有多单又有空单，按照之前的逻辑顺势加仓
         if (magic1Counter.buyOrderCount != 0 && magic1Counter.sellOrderCount != 0) {
-            
+
             // 既有多单又有空单，进行顺势加仓，解套
             if(magic1Counter.firstOrderType == OP_BUY)
             {
@@ -594,13 +599,264 @@ void dismissProfit(Counter & counter)
     {
         // 方案2：用最大手数的单子对冲
         // 找到最大手数的多单和空单并对冲它们
-        HedgeLargestLotOrders(counter);
+        //HedgeLargestLotOrders(counter);
     }
     else if (marketCondition == "range")
     {
         // 方案 1
         // 找到最盈利和最亏损的订单并对冲它们
-        HedgeMostProfitableAndMostLosingOrders(counter);
+        //HedgeMostProfitableAndMostLosingOrders(counter);
+        
+        // 方案 3
+        //HedgeMostProfitableWithLosses(counter);
+    }
+    
+    // 方案 4
+    CheckAndCloseOrders(dismissProfit);
+}
+
+int profitableCount = 0;
+// 获取所有盈利订单，并将其存储在 profitableOrders 数组中
+void GetProfitableOrders()
+{
+    profitableCount = 0; // 初始化盈利订单计数器
+
+    // 遍历所有订单
+    for (int i = 0; i < OrdersTotal(); i++)
+    {
+        if (OrderSelect(i, SELECT_BY_POS))
+        {
+            // 检查订单类型，过滤掉非市场订单（仅保留多单和空单）
+            if (OrderType() == OP_BUY || OrderType() == OP_SELL)
+            {
+                if (OrderProfit() > 0) // 如果订单是盈利的
+                {
+                    profitableOrders[profitableCount++] = i; // 将订单索引存储在 profitableOrders 数组中
+                }
+            }
+        }
+    }
+}
+
+// 获取所有亏损订单，并将其存储在 lossOrders 数组中
+int lossCount = 0;
+void GetLossOrders()
+{
+    lossCount = 0; // 初始化亏损订单计数器
+
+    // 遍历所有订单
+    for (int i = 0; i < OrdersTotal(); i++)
+    {
+        if (OrderSelect(i, SELECT_BY_POS))
+        {
+            // 检查订单类型，过滤掉非市场订单（仅保留多单和空单）
+            if (OrderType() == OP_BUY || OrderType() == OP_SELL)
+            {
+                if (OrderProfit() < 0) // 如果订单是亏损的
+                {
+                    lossOrders[lossCount++] = i; // 将订单索引存储在 lossOrders 数组中
+                }
+            }
+        }
+    }
+}
+
+// 计算盈利组合，目标是找到一个盈利订单的组合，这个组合的总盈利可以平衡一个或多个亏损订单的总亏损。使用递归的方式来检查所有可能的组合。
+// 找到一个组合，使得该组合的盈利能够覆盖给定的亏损
+bool FindProfitCombination(double targetProfit, double currentProfit, int startIndex, int &selectedOrders[], int &selectedCount)
+{
+    // 如果当前盈利已经达到或超过目标盈利，返回 true
+    if (currentProfit >= targetProfit)
+    {
+        Print("当前盈利已经达到或超过目标盈利");
+        return true;
+    }
+
+    // 循环遍历所有盈利订单，从 startIndex 开始
+    for (int i = startIndex; i < profitableCount; i++)
+    {
+        int orderIndex = profitableOrders[i];
+
+        // 确保选择的是一个未被选中的订单
+        bool alreadySelected = false;
+        for (int j = 0; j < selectedCount; j++)
+        {
+            if (selectedOrders[j] == orderIndex)
+            {
+                alreadySelected = true;
+                break;
+            }
+        }
+
+        // 如果该订单未被选中，则尝试选择它
+        if (!alreadySelected)
+        {
+            selectedOrders[selectedCount++] = orderIndex;
+            double newProfit = currentProfit + OrderProfit();
+            // 递归调用函数以检查加入该订单后的组合是否满足条件
+            if (FindProfitCombination(targetProfit, newProfit, i + 1, selectedOrders, selectedCount))
+            {
+                return true;
+            }
+
+            // 如果加入该订单后无法满足条件，则移除该订单并继续检查下一个
+            selectedCount--;
+        }
+    }
+
+    // 如果没有找到满足条件的组合，则返回 false
+    return false;
+}
+
+
+// 关闭选定的订单
+void CloseSelectedOrders(int &selectedOrders[], int selectedCount)
+{
+    for (int i = 0; i < selectedCount; i++)
+    {
+        int orderIndex = selectedOrders[i];
+
+        if (OrderSelect(orderIndex, SELECT_BY_POS))
+        {
+            int ticket = OrderTicket();
+            double lots = OrderLots();
+            double price = OrderClosePrice();
+            int slippage = 3000;
+            color arrowColor = clrRed;
+
+            if (OrderType() == OP_BUY)
+                price = Bid;
+            else if (OrderType() == OP_SELL)
+                price = Ask;
+
+            if (!OrderClose(ticket, lots, price, slippage, arrowColor))
+            {
+                Print("关闭选定的订单失败: ", GetLastError());
+            }
+        }
+    }
+}
+
+
+// 检查订单并尝试平仓
+void CheckAndCloseOrders(double minProfit)
+{
+    // 获取所有盈利订单
+    GetProfitableOrders();
+
+    // 获取所有亏损订单
+    GetLossOrders();
+
+    // 声明一个数组来存储选中的订单
+    int selectedOrders[100];
+    int selectedCount = 0;
+
+       
+    // 遍历所有亏损订单
+    for (int i = 0; i < lossCount; i++)
+    {
+        int orderIndex = lossOrders[i];
+        double lossAmount = -OrderProfit(); // 转换为正数
+
+        // 初始化选中订单数组
+        ArrayInitialize(selectedOrders, -1);
+        selectedCount = 0;
+
+        // 尝试找到一个组合，使得该组合的盈利能够覆盖当前亏损订单的亏损
+        if (FindProfitCombination(lossAmount + minProfit, 0, 0, selectedOrders, selectedCount))
+        {
+            // 如果找到这样的组合，则关闭这些订单
+            selectedOrders[selectedCount++] = lossOrderIndex; // 包括亏损订单在内
+            CloseSelectedOrders(selectedOrders, selectedCount);
+
+            break;
+        }
+    }
+}
+
+
+// 方案 3
+// 找到最盈利的单子然后去亏损的单子中找出合适的进行对冲
+// 对冲最盈利单子与合适的亏损单子
+void HedgeMostProfitableWithLosses(Counter & counter)
+{
+    int totalOrders = OrdersTotal();
+
+    // 如果订单数量少于2，不执行对冲
+    if (totalOrders < 2)
+    {
+        return;
+    }
+    
+    // 如果只有一个方向的单子，不执行对冲
+    if (counter.sellOrderCount == 0 || counter.buyOrderCount == 0)
+    {
+        return;
+    }
+
+    int mostProfitableOrderIndex = -1;
+    double maxProfit = 0;
+
+    // 找到最盈利的单子
+    for (int i = 0; i < totalOrders; i++)
+    {
+        if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+        {
+            double profit = OrderProfit();
+
+            if (profit > maxProfit)
+            {
+                maxProfit = profit;
+                mostProfitableOrderIndex = i;
+            }
+        }
+    }
+
+    // 检查是否找到有效的盈利单子
+    if (mostProfitableOrderIndex != -1)
+    {
+        OrderSelect(mostProfitableOrderIndex, SELECT_BY_POS, MODE_TRADES);
+        int profitTicket = OrderTicket();
+        double profitAmount = OrderProfit();
+        double profitLots = OrderLots();
+
+        // 遍历亏损单子，寻找合适的亏损单子进行对冲
+        for (int i = 0; i < totalOrders; i++)
+        {
+            if (OrderSelect(i, SELECT_BY_POS, MODE_TRADES))
+            {
+                double lossAmount = OrderProfit();
+                double lossLots = OrderLots();
+                int lossTicket = OrderTicket();
+
+                // 检查是否为亏损单子
+                if (lossAmount < 0)
+                {
+                    double netProfit = profitAmount + lossAmount;
+
+                    // 检查利润是否满足条件
+                    if (netProfit >= dismissProfit)
+                    {
+                        bool closeProfit = OrderClose(profitTicket, profitLots, OrderClosePrice(), 300, clrViolet);
+                        bool closeLoss = OrderClose(lossTicket, lossLots, OrderClosePrice(), 300, clrViolet);
+
+                        if (closeProfit && closeLoss)
+                        {
+                            Print("平仓最盈利的订单 (ticket ", profitTicket, ") 亏损订单 (ticket ", lossTicket, ")");
+                            return; // 平仓后退出函数
+                        }
+                        else
+                        {
+                            Print("平仓 失败 。。。");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        //Print("没有要平仓的");
     }
 }
 
@@ -914,11 +1170,11 @@ int openSellStop(double lots,double sellStop, double sl,double tp,string com,int
 
 bool IsSpreadWithinThreshold()
 {
-    bool isWithinThreshold = false;
-    if(Ask - Bid < baseInterval * Point)
-    {
-        isWithinThreshold = true;
-    }
+    bool isWithinThreshold = true;
+//    if(Ask - Bid < baseInterval * Point)
+//    {
+//        isWithinThreshold = true;
+//    }
     return(isWithinThreshold);
 }
 
@@ -1217,7 +1473,7 @@ void updateAccountInfo(const Counter & counter)
     "                                                               多单个数和手数:"+DoubleToStr(counter.buyOrderCount,2)+",  "+
     DoubleToStr(counter.buyTotalLots,2)+"手,  "+
     "盈亏:"+DoubleToStr(counter.buyTotalProfit,2)+"\n" +
-    "                                                                Version: 2024-6-18 09:55";
+    "                                                                Version: 2024-6-19 10:30";
     
     Comment(msg);
     
@@ -1225,5 +1481,6 @@ void updateAccountInfo(const Counter & counter)
 
 void OnDeinit(const int reason)
 {}
+
 
 
