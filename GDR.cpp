@@ -12,30 +12,33 @@ enum TradeDirection
 
 extern TradeDirection tradeDirection = SELL;   //做单方向
 
-input double openLots = 0.1;               //首次开仓手数
-input int addPositionInterval = 50;        //加仓间隔点数
+input double openLots = 0.01;               //首次开仓手数
+input double openLotsAfterClearAll = 0.01;  //清仓后开仓手数
+
+input int addPositionInterval = 1000;        //加仓间隔点数
 input double positionMultiplier = 1.3;      //加仓的倍数
 input double maxOrderLots = 2.0;            //单个订单最大手数
 input int additionalSpreadAfterMaxOrder = 100;//单个订单达到最大手数后开仓间距增加点数
 input double maxStopLoss = -2000;            //亏损多大时停止开仓（-2000）
 input int averagePriceTakeProfitPoints = 1100;//均价止盈点数
-input double overallProfitTarget = 1;   //整体盈利金额
-input string orderComment = "第一组";  //注释1
+input double overallProfitTarget = 2;   //当出现多空都开时，整体盈利金额
+input string orderComment = "666";  //注释1
 input int magicNumber = 666;//模式一魔术码
-input bool isOpenTrailingTakeProfit = false;//第一组是否开启移动止损
+input bool isOpenTrailingTakeProfit = true;//第一组是否开启移动止损
 input string s1 = "单边盈利移动止损参数";
-input int danbianCTrailingStop1 = 200;//盈利最小盈利点数
-input int danbianCTrailingStep2 = 500;//盈利移动止损移动间隔点数
+input int danbianCTrailingStop1 = 1000;//盈利最小盈利点数
+input int danbianCTrailingStep2 = 1000;//盈利移动止损移动间隔点数
 input string s2 = "解套移动止损参数";
 input int jietaoCTrailingStop1 = 1500;//解套最小盈利点数
 input int jietaoCTrailingStep2 = 1500;//解套移动止损移动间隔点数
 input bool isOpenIEMA = false;//是否开启均线辅助开仓
 input bool isOpenSAR  = true;//是否开启SAR开仓
 input string s3 = "消单逻辑参数";
-input bool isOpenDismiss  = true;//是否开启多空消单逻辑
+input bool isOpenDismiss  = false;//是否开启多空消单逻辑
 input int dismissProfit = 2;//盈利多少开始消单
 input int OverBuyValue = 85;//Stochastic超买值
 input int OverSellValue = 15;//Stochastic超卖值
+input bool isOpenSlowMode  = true;//是否开启严格模式
 
 
 extern ENUM_TIMEFRAMES iMAPERIOD = PERIOD_M5;//均线周期
@@ -169,14 +172,17 @@ void OnTick()
         //return;
     }
     
-    // 整体止盈
-    if((magic1Counter.totalProfit) > overallProfitTarget)
+    // 整体止盈 当多空都有单的时候 执行整体止盈，减少被套的几率
+    if((magic1Counter.totalProfit) > overallProfitTarget && magic1Counter.buyOrderCount > 0 && magic1Counter.sellOrderCount > 0)
     {
         closeAllOrdersByMagicNumber(magicNumber);
+        magic1Counter.buyOrderCount = 0;
+        magic1Counter.sellOrderCount = 0;
+        Sleep(3000);
     }
 
-    // 移动止盈
-    if(isOpenTrailingTakeProfit)
+    // 移动止盈 只有一个方向的时候 才执行移动止盈 多空都有的时候 执行整体止盈
+    if(isOpenTrailingTakeProfit && !(magic1Counter.buyOrderCount > 0 && magic1Counter.sellOrderCount > 0))
     {
         TrailingPositions(magic1Counter, magicNumber);
     }
@@ -209,10 +215,18 @@ void openStrategy0(Counter & magic1Counter)
         sar = iSAR(NULL, 0, 0.02, 0.2, 0);
         double longSAR = iSAR(NULL,PERIOD_M15,0.02,0.2,0);
         
-        if (Bid > sar && Bid > longSAR) {
-            buySignal = true;
-        }else if(Bid < sar && Bid < longSAR){
-            sellSignal = true;
+        if (isOpenSlowMode) {
+            if (Bid > sar && Bid > longSAR) {
+                buySignal = true;
+            }else if(Bid < sar && Bid < longSAR){
+                sellSignal = true;
+            }
+        }else{
+            if (Bid > sar) {
+                buySignal = true;
+            }else if(Bid < sar){
+                sellSignal = true;
+            }
         }
     }
 
@@ -243,14 +257,14 @@ void openStrategy0(Counter & magic1Counter)
             // 既有多单又有空单，进行顺势加仓，解套
             if(magic1Counter.firstOrderType == OP_BUY)
             {
-                if(magic1Counter.buyOrderCount == 0 && buySignal)
-                {
-                    openBuy(openLots, 0,0,orderComment,magicNumber);
-                    firstBuyOrderLots = openLots;
-                    return;
-                }
+//                if(magic1Counter.buyOrderCount == 0 && buySignal)
+//                {
+//                    openBuy(openLots, 0,0,orderComment,magicNumber);
+//                    firstBuyOrderLots = openLots;
+//                    return;
+//                }
                 
-                if(Ask >= magic1Counter.lastBuyOrderPrice + nextBuyOrderIntervalPoint*Point)
+                if((Ask >= magic1Counter.lastBuyOrderPrice + nextBuyOrderIntervalPoint*Point) && buySignal)
                 {
                     double lots = CalcNextOrderLots(magic1Counter, OP_BUY);
                     if(magic1Counter.sellOrderCount == 0)
@@ -263,13 +277,13 @@ void openStrategy0(Counter & magic1Counter)
                 
                 if(Bid <= magic1Counter.firstBuyOrderPrice)
                 {
-                    if(magic1Counter.sellOrderCount == 0 && Bid<=magic1Counter.firstBuyOrderPrice- nextSellOrderIntervalPoint*Point && sellSignal)
+                    if((magic1Counter.sellOrderCount == 0 && Bid<=magic1Counter.firstBuyOrderPrice- nextSellOrderIntervalPoint*Point) && sellSignal)
                     {
                         openSell(openLots, 0,0,orderComment,magicNumber);
                         return;
                     }
                     else
-                        if(Bid <= magic1Counter.lastSellOrderPrice - nextSellOrderIntervalPoint*Point)
+                        if((Bid <= magic1Counter.lastSellOrderPrice - nextSellOrderIntervalPoint*Point) && sellSignal)
                         {
                             double lots = CalcNextOrderLots(magic1Counter, OP_SELL);
                             if(magic1Counter.buyOrderCount == 0)
@@ -284,13 +298,13 @@ void openStrategy0(Counter & magic1Counter)
             
             if(magic1Counter.firstOrderType==OP_SELL)
             {
-                if(magic1Counter.sellOrderCount == 0 && sellSignal)
-                {
-                    openSell(openLots,0,0,orderComment,magicNumber);
-                    firstSellOrderLots = openLots;
-                    return;
-                }
-                if(Bid<=magic1Counter.lastSellOrderPrice- nextSellOrderIntervalPoint*Point)
+//                if(magic1Counter.sellOrderCount == 0 && sellSignal)
+//                {
+//                    openSell(openLots,0,0,orderComment,magicNumber);
+//                    firstSellOrderLots = openLots;
+//                    return;
+//                }
+                if((Bid<=magic1Counter.lastSellOrderPrice- nextSellOrderIntervalPoint*Point) && sellSignal)
                 {
                     double lots = CalcNextOrderLots(magic1Counter, OP_SELL);
                     if(magic1Counter.buyOrderCount == 0)
@@ -303,13 +317,13 @@ void openStrategy0(Counter & magic1Counter)
                 
                 if(Ask >= magic1Counter.firstSellOrderPrice)
                 {
-                    if(magic1Counter.buyOrderCount == 0 && Ask >= magic1Counter.firstSellOrderPrice + nextBuyOrderIntervalPoint*Point && buySignal)
+                    if((magic1Counter.buyOrderCount == 0 && Ask >= magic1Counter.firstSellOrderPrice + nextBuyOrderIntervalPoint*Point) && buySignal)
                     {
                         openBuy(openLots,0,0,orderComment,magicNumber);
                         return;
                     }
                     else
-                        if(magic1Counter.buyOrderCount > 0 && Ask >= magic1Counter.lastBuyOrderPrice + nextBuyOrderIntervalPoint*Point)
+                        if((magic1Counter.buyOrderCount > 0 && Ask >= magic1Counter.lastBuyOrderPrice + nextBuyOrderIntervalPoint*Point) && buySignal)
                         {
                             double lots = CalcNextOrderLots(magic1Counter, OP_BUY);
                             if(magic1Counter.sellOrderCount == 0)
@@ -708,7 +722,6 @@ bool FindProfitCombination(double targetProfit, double currentProfit, int startI
     return false;
 }
 
-
 // 关闭选定的订单
 void CloseSelectedOrders(int &selectedOrders[], int selectedCount)
 {
@@ -750,12 +763,11 @@ void CheckAndCloseOrders(double minProfit)
     // 声明一个数组来存储选中的订单
     int selectedOrders[100];
     int selectedCount = 0;
-
-       
+  
     // 遍历所有亏损订单
     for (int i = 0; i < lossCount; i++)
     {
-        int orderIndex = lossOrders[i];
+        int lossOrderIndex = lossOrders[i];
         double lossAmount = -OrderProfit(); // 转换为正数
 
         // 初始化选中订单数组
@@ -1018,64 +1030,88 @@ void HedgeLargestLotOrders(Counter & counter)
     }
 }
 
-void TrailingPositions(Counter & magic1Counter, int magicma)
+void TrailingPositions(Counter &magic1Counter, int magicma)
 {
-    if(!isOpenTrailingTakeProfit)
+    if (!isOpenTrailingTakeProfit)
     {
         return;
     }
+
     int ordersTotal = OrdersTotal();
-    double minstoplevel=MarketInfo(Symbol(),MODE_STOPLEVEL);
+    double minstoplevel = MarketInfo(Symbol(), MODE_STOPLEVEL);
     int CTrailingStop1 = danbianCTrailingStop1;
     int CTrailingStep2 = danbianCTrailingStep2;
-    if(magic1Counter.buyOrderCount > 0 && magic1Counter.sellOrderCount > 0)
+
+    // 判断是否有多空单存在，并调整跟踪止损的值
+    if (magic1Counter.buyOrderCount > 0 && magic1Counter.sellOrderCount > 0)
     {
         CTrailingStop1 = jietaoCTrailingStop1;
         CTrailingStep2 = jietaoCTrailingStep2;
     }
-    while(ordersTotal > 0)
+
+    while (ordersTotal > 0)
     {
         ordersTotal--;
-        //如果 仓单编号不符合，或者 选中仓单失败，跳过
-        if(!OrderSelect(ordersTotal, SELECT_BY_POS, MODE_TRADES) || OrderMagicNumber() != magicma)
+        // 如果仓单编号不符合，或者选中仓单失败，跳过
+        if (!OrderSelect(ordersTotal, SELECT_BY_POS, MODE_TRADES) || OrderMagicNumber() != magicma)
             continue;
-        if(OrderType() == OP_BUY)
+
+        if (OrderType() == OP_BUY)
         {
-            if(NormalizeDouble(Bid - OrderOpenPrice(), Digits) > NormalizeDouble(Point * (CTrailingStop1 + CTrailingStep2), Digits))
-                if(NormalizeDouble(OrderStopLoss(), Digits) < NormalizeDouble(Bid - Point * CTrailingStep2, Digits) || OrderStopLoss() == 0.0)
+            double currentProfit = Bid - OrderOpenPrice();
+            double requiredProfit = Point * (CTrailingStop1 + CTrailingStep2);
+            double newStopLoss = Bid - Point * CTrailingStep2;
+
+            if (NormalizeDouble(currentProfit, Digits) > NormalizeDouble(requiredProfit, Digits))
+            {
+                if (NormalizeDouble(OrderStopLoss(), Digits) < NormalizeDouble(newStopLoss, Digits) || OrderStopLoss() == 0.0)
                 {
-                    double StopLoss = NormalizeDouble(Bid-Point*CTrailingStep2,Digits);
-                    if(Bid - StopLoss < StopLevel * Point)
-                        StopLoss = Bid - StopLevel * Point;
-                    bool res=OrderModify(OrderTicket(),OrderOpenPrice(),StopLoss,OrderTakeProfit(),0,Blue);
-                    if(!res)
-                        Alert("OrderModify buy error:",GetLastError(),"bid:",Bid);
-                    else
-                        Print("Order modified successfully.");
-                }
-        }
-        
-        if(OrderType() == OP_SELL)
-        {
-            if(NormalizeDouble(OrderOpenPrice() - Ask, Digits) > NormalizeDouble(Point * (CTrailingStop1 + CTrailingStep2), Digits))
-                if(NormalizeDouble(OrderStopLoss(), Digits) > NormalizeDouble(Ask + Point * CTrailingStep2, Digits) || OrderStopLoss() == 0.0)
-                {
-                    double StopLoss =  NormalizeDouble(Ask + Point * CTrailingStep2, Digits);
-                    
-                    if(StopLoss - Ask < StopLevel * Point)
+                    if (Bid - newStopLoss < minstoplevel * Point)
                     {
-                        StopLoss = Ask + StopLevel * Point;
+                        newStopLoss = Bid - minstoplevel * Point;
                     }
-                    
-                    bool res= OrderModify(OrderTicket(), OrderOpenPrice(), StopLoss, OrderTakeProfit(), 0, Orange);
-                    if(!res)
-                        Alert("OrderModify sell error:",GetLastError(),"ask:",Ask);
+
+                    if (!OrderModify(OrderTicket(), OrderOpenPrice(), newStopLoss, OrderTakeProfit(), 0, Blue))
+                    {
+                        Alert("OrderModify buy error:", GetLastError(), "bid:", Bid);
+                    }
                     else
+                    {
                         Print("Order modified successfully.");
+                    }
                 }
+            }
+        }
+
+        if (OrderType() == OP_SELL)
+        {
+            double currentProfit = OrderOpenPrice() - Ask;
+            double requiredProfit = Point * (CTrailingStop1 + CTrailingStep2);
+            double newStopLoss = Ask + Point * CTrailingStep2;
+
+            if (NormalizeDouble(currentProfit, Digits) > NormalizeDouble(requiredProfit, Digits))
+            {
+                if (NormalizeDouble(OrderStopLoss(), Digits) > NormalizeDouble(newStopLoss, Digits) || OrderStopLoss() == 0.0)
+                {
+                    if (newStopLoss - Ask < minstoplevel * Point)
+                    {
+                        newStopLoss = Ask + minstoplevel * Point;
+                    }
+
+                    if (!OrderModify(OrderTicket(), OrderOpenPrice(), newStopLoss, OrderTakeProfit(), 0, Orange))
+                    {
+                        Alert("OrderModify sell error:", GetLastError(), "ask:", Ask);
+                    }
+                    else
+                    {
+                        Print("Order modified successfully.");
+                    }
+                }
+            }
         }
     }
 }
+
 
 void checkPrice(double &Entry, double &StopLoss, double &TakeProfit)
 {
@@ -1181,6 +1217,14 @@ bool IsSpreadWithinThreshold()
 double CalcNextOrderLots(const Counter & counter, int openOrderType)
 {
     double nextOrderLots = openLots;
+    //清仓后重头开始
+   if(counter.buyOrderCount == 0 && counter.sellOrderCount == 0)
+    {
+        nextOrderLots = openLotsAfterClearAll;
+        Print("清仓后重头开始",nextOrderLots);
+        return nextOrderLots;
+    }
+    
     if(openOrderType == OP_BUY && counter.buyOrderCount > 0)
     {
         nextOrderLots = counter.firstBuyOrderLots;
@@ -1206,6 +1250,8 @@ double CalcNextOrderLots(const Counter & counter, int openOrderType)
     {
         nextOrderLots = maxOrderLots;
     }
+    Print("计算手数 nextOrderLots = ",nextOrderLots);
+
     return (nextOrderLots);
 }
 
@@ -1473,7 +1519,7 @@ void updateAccountInfo(const Counter & counter)
     "                                                               多单个数和手数:"+DoubleToStr(counter.buyOrderCount,2)+",  "+
     DoubleToStr(counter.buyTotalLots,2)+"手,  "+
     "盈亏:"+DoubleToStr(counter.buyTotalProfit,2)+"\n" +
-    "                                                                Version: 2024-6-19 10:30";
+    "                                                                Version: 2024-6-22 9:30";
     
     Comment(msg);
     
@@ -1481,6 +1527,7 @@ void updateAccountInfo(const Counter & counter)
 
 void OnDeinit(const int reason)
 {}
+
 
 
 
